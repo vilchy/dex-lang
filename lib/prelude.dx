@@ -1449,12 +1449,15 @@ def post_slice(xs:n=>a, start:Post n, end:Post n) -> List a given (n|Ix, a) =
   to_list for i:(Fin slice_size).
     xs[unsafe_from_ordinal(n=n, ordinal i + ordinal start)]
 
+def list_from_ptr(n:Word32, ptr:Ptr a) -> {IO} List a given (a|Storable) =
+  AsList(rep_to_nat n, table_from_ptr ptr)
+
 '## Strings and Characters
 
 String : Type = List Char
 
 def string_from_char_ptr(n:Word32, ptr:Ptr Char) -> {IO} String =
-  AsList(rep_to_nat n, table_from_ptr ptr)
+  list_from_ptr(n, ptr)
 
 -- TODO. This is ASCII code point. It really should be Int32 for Unicode codepoint
 def codepoint(c:Char) -> Int = w8_to_i c
@@ -2421,15 +2424,15 @@ def dex_test_mode() -> Bool = unsafe_io \. check_env "DEX_TEST_MODE"
 
 '### More Stream IO
 
-def fread(stream:Stream ReadMode) -> {IO} String =
-  -- TODO: allow reading longer files!
-  n = 4096
-  ptr:(Ptr Char) <- with_alloc n
-  stack <- with_stack Char
+def fread(stream:Stream ReadMode) -> {IO} List a given (a|Storable) =
+  obj_size = storage_size(a=a)
+  n = 4096 `idiv` obj_size
+  ptr:(Ptr a) <- with_alloc n
+  stack <- with_stack a
   iter \_.
-    numRead = i_to_w32 $ i64_to_i $ freadFFI(ptr.val, 1, n_to_i64 n, stream.ptr)
-    AsList(_, new_chars) = string_from_char_ptr(numRead, ptr)
-    stack.extend(new_chars)
+    numRead = i_to_w32 $ i64_to_i $ freadFFI(ptr.val, n_to_i64 obj_size, n_to_i64 n, stream.ptr)
+    AsList(_, new_values) = list_from_ptr(numRead, ptr)
+    stack.extend(new_values)
     if numRead == n_to_w32 n
       then Continue
       else Done ()
@@ -2474,7 +2477,7 @@ def with_file(
 def write_file(f:FilePath, s:String) -> {IO} () =
   with_file(f, WriteMode) \stream. fwrite(stream, s)
 
-def read_file(f:FilePath) -> {IO} String =
+def read_file(f:FilePath) -> {IO} List a given (a|Storable) =
   with_file(f, ReadMode) \stream. fread stream
 
 def has_file(f:FilePath) -> {IO} Bool =
